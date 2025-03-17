@@ -84,9 +84,20 @@
             background-color: #2980b9;
         }
 
+        .game-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
         .lives {
             display: flex;
             align-items: center;
+            font-size: 18px;
+            color: var(--primary-color);
+        }
+        
+        .progress-counter {
             font-size: 18px;
             color: var(--primary-color);
         }
@@ -228,11 +239,16 @@
                 <input type="text" id="seed" placeholder="4-digit code" maxlength="4" pattern="[0-9]{4}">
                 <button id="generate">Generate</button>
             </div>
-            <div class="lives">
-                Lives: 
-                <span class="heart">❤</span>
-                <span class="heart">❤</span>
-                <span class="heart">❤</span>
+            <div class="game-stats">
+                <div class="lives">
+                    Lives: 
+                    <span class="heart">❤</span>
+                    <span class="heart">❤</span>
+                    <span class="heart">❤</span>
+                </div>
+                <div class="progress-counter">
+                    Cells left: <span id="cells-remaining">0</span>
+                </div>
             </div>
         </div>
         
@@ -265,6 +281,7 @@
                 this.selectedCell = null;
                 this.gameOver = false;
                 this.completed = false;
+                this.emptyCellsCount = 0;
                 
                 // DOM elements
                 this.gridElement = document.getElementById('grid');
@@ -273,6 +290,7 @@
                 this.messageElement = document.getElementById('message');
                 this.heartElements = document.querySelectorAll('.heart');
                 this.numberButtons = document.querySelectorAll('.num-button');
+                this.cellsRemainingElement = document.getElementById('cells-remaining');
                 
                 // Initialize the game
                 this.initializeGame();
@@ -486,8 +504,8 @@
                     }
                 }
                 
-                // Define difficulty level - for difficult puzzles, remove more cells
-                const cellsToRemove = 55 + Math.floor(this.seededRandom() * 6); // 55-60 cells removed (difficult)
+                // Define difficulty level - for difficult but solvable puzzles
+                const cellsToRemove = 45 + Math.floor(this.seededRandom() * 6); // 45-50 cells removed (challenging but solvable)
                 
                 // Create position array for all cells
                 const positions = [];
@@ -500,17 +518,95 @@
                 // Shuffle positions
                 this.shuffleArray(positions);
                 
-                // Remove numbers one by one, ensuring the puzzle still has a unique solution
-                for (let i = 0; i < cellsToRemove; i++) {
+                // Remove numbers one by one, ensuring the puzzle remains solvable
+                let removedCount = 0;
+                for (let i = 0; i < positions.length && removedCount < cellsToRemove; i++) {
                     const pos = positions[i];
                     const row = pos.row;
                     const col = pos.col;
-                    const removed = this.grid[row][col];
                     
-                    // Remove the number
+                    // Store original value
+                    const originalValue = this.grid[row][col];
+                    
+                    // Try removing this number
                     this.grid[row][col] = 0;
                     this.fixedCells[row][col] = false;
+                    
+                    // Check if the puzzle is still reasonably solvable
+                    if (this.isReasonablySolvable()) {
+                        removedCount++;
+                    } else {
+                        // Put the number back if removing it makes the puzzle too difficult
+                        this.grid[row][col] = originalValue;
+                        this.fixedCells[row][col] = true;
+                    }
                 }
+                
+                // Count empty cells
+                this.updateEmptyCellsCount();
+            }
+            
+            // Check if the puzzle can be reasonably solved with logical deduction
+            isReasonablySolvable() {
+                // Create a working copy of the grid
+                const tempGrid = [];
+                for (let i = 0; i < 9; i++) {
+                    tempGrid[i] = [...this.grid[i]];
+                }
+                
+                // Try to solve the puzzle using basic logical deduction techniques
+                let progress = true;
+                let iterations = 0;
+                const maxIterations = 50; // Limit iterations to avoid infinite loops
+                
+                while (progress && iterations < maxIterations) {
+                    iterations++;
+                    progress = false;
+                    
+                    // Try each cell
+                    for (let row = 0; row < 9; row++) {
+                        for (let col = 0; col < 9; col++) {
+                            if (tempGrid[row][col] === 0) {
+                                // Find possible values for this cell
+                                const possibilities = [];
+                                
+                                for (let num = 1; num <= 9; num++) {
+                                    if (this.isValidPlacement(tempGrid, row, col, num)) {
+                                        possibilities.push(num);
+                                    }
+                                }
+                                
+                                // If only one possibility, fill it in
+                                if (possibilities.length === 1) {
+                                    tempGrid[row][col] = possibilities[0];
+                                    progress = true;
+                                } 
+                                // If more than 3 possibilities, the puzzle might be too difficult
+                                else if (possibilities.length > 3) {
+                                    // Allow some cells to have multiple possibilities
+                                    // but not too many to keep the puzzle solvable
+                                    const difficulty = this.seededRandom();
+                                    if (difficulty > 0.7) {
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Check if the puzzle has been solved or is close to solved
+                let emptyCount = 0;
+                for (let row = 0; row < 9; row++) {
+                    for (let col = 0; col < 9; col++) {
+                        if (tempGrid[row][col] === 0) {
+                            emptyCount++;
+                        }
+                    }
+                }
+                
+                // If more than 20 cells are still empty, the puzzle might be too difficult
+                return emptyCount <= 20;
             }
             
             // Update the grid display
@@ -571,6 +667,9 @@
                     this.cells[index].textContent = num;
                     this.cells[index].classList.add('user-input');
                     this.cells[index].classList.remove('incorrect');
+                    
+                    // Update empty cells count
+                    this.updateEmptyCellsCount();
                     
                     // Check if the puzzle is complete
                     if (this.isPuzzleComplete()) {
@@ -642,6 +741,19 @@
             // Hide the message
             hideMessage() {
                 this.messageElement.className = 'message';
+            }
+            
+            // Count and update the number of empty cells
+            updateEmptyCellsCount() {
+                this.emptyCellsCount = 0;
+                for (let row = 0; row < 9; row++) {
+                    for (let col = 0; col < 9; col++) {
+                        if (this.grid[row][col] === 0) {
+                            this.emptyCellsCount++;
+                        }
+                    }
+                }
+                this.cellsRemainingElement.textContent = this.emptyCellsCount;
             }
         }
         
