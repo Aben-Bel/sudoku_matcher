@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sudoku Challenge</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; color: #333; }
+    .container { max-width: 500px; margin: 30px auto; text-align: center; }
+    h1 { margin-bottom: 20px; }
+    #seed-container { margin-bottom: 20px; }
+    #seed-input { padding: 10px; font-size: 1em; width: 150px; }
+    #start-button { padding: 10px 15px; font-size: 1em; cursor: pointer; }
+    #lives { font-size: 1.5em; margin: 10px 0; }
+    #message { font-size: 1.2em; margin: 10px 0; height: 1.5em; }
+    #sudoku-board {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 0;
+      max-width: 450px;
+      margin: 20px auto;
+      border: 2px solid #000;
+    }
+    .sudoku-cell {
+      position: relative;
+      width: 100%;
+      padding-bottom: 100%;
+      background: #fff;
+    }
+    .sudoku-cell span,
+    .sudoku-cell input {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      line-height: 2.5em;
+      text-align: center;
+      font-size: 1.2em;
+    }
+    .sudoku-cell span {
+      font-weight: bold;
+    }
+    .sudoku-cell input {
+      border: none;
+      outline: none;
+      font-family: inherit;
+      background: none;
+    }
+    .sudoku-cell input::-webkit-outer-spin-button,
+    .sudoku-cell input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    /* Thick borders for 3x3 blocks */
+    .sudoku-cell {
+      border: 1px solid #ccc;
+    }
+    /* Top border for first row of each block */
+    .sudoku-cell:nth-child(n+1):nth-child(-n+9) { }
+    /* We will add inline style for thicker borders below */
+    /* Wrong input highlight */
+    input.wrong { background-color: #fbb; }
+    @media (max-width: 500px) {
+      #sudoku-board { width: 95%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Sudoku Challenge</h1>
+    <div id="seed-container">
+      <input type="text" id="seed-input" maxlength="4" placeholder="Enter 4-digit number" />
+      <button id="start-button">Start Game</button>
+    </div>
+    <div id="lives">♥♥♥</div>
+    <div id="message"></div>
+    <div id="sudoku-board"></div>
+  </div>
+  <script>
+    // Global variables
+    let currentSolution, currentPuzzle;
+    let wrongGuesses = 0;
+
+    // Base solved board (a known valid sudoku solution)
+    const baseBoard = [
+      [5,3,4,6,7,8,9,1,2],
+      [6,7,2,1,9,5,3,4,8],
+      [1,9,8,3,4,2,5,6,7],
+      [8,5,9,7,6,1,4,2,3],
+      [4,2,6,8,5,3,7,9,1],
+      [7,1,3,9,2,4,8,5,6],
+      [9,6,1,5,3,7,2,8,4],
+      [2,8,7,4,1,9,6,3,5],
+      [3,4,5,2,8,6,1,7,9]
+    ];
+
+    // Seeded random generator (Linear Congruential Generator)
+    function seededRandom(seed) {
+      let m = 0x80000000, a = 1103515245, c = 12345;
+      let state = seed;
+      return function() {
+        state = (a * state + c) % m;
+        return state / (m - 1);
+      };
+    }
+
+    // Fisher–Yates shuffle using our seeded RNG
+    function shuffleArray(array, rng) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+    }
+
+    // Generate puzzle and solution from a 4-digit seed
+    function generatePuzzle(seed) {
+      const rng = seededRandom(parseInt(seed));
+      // Deep copy of baseBoard for the solution
+      let solution = JSON.parse(JSON.stringify(baseBoard));
+
+      // Create a permutation of [1..9]
+      let nums = [1,2,3,4,5,6,7,8,9];
+      shuffleArray(nums, rng);
+      // Replace each number in the solution by its permutation mapping
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          solution[i][j] = nums[ solution[i][j] - 1 ];
+        }
+      }
+
+      // Randomly swap rows within each block
+      for (let block = 0; block < 3; block++) {
+        let row1 = block * 3 + Math.floor(rng() * 3);
+        let row2 = block * 3 + Math.floor(rng() * 3);
+        [solution[row1], solution[row2]] = [solution[row2], solution[row1]];
+      }
+      // Randomly swap columns within each block
+      for (let block = 0; block < 3; block++) {
+        let col1 = block * 3 + Math.floor(rng() * 3);
+        let col2 = block * 3 + Math.floor(rng() * 3);
+        for (let i = 0; i < 9; i++) {
+          [solution[i][col1], solution[i][col2]] = [solution[i][col2], solution[i][col1]];
+        }
+      }
+
+      // Create puzzle by removing cells (remove 55 cells, leaving 26 clues)
+      let puzzle = JSON.parse(JSON.stringify(solution));
+      let cellsToRemove = 55;
+      while (cellsToRemove > 0) {
+        let i = Math.floor(rng() * 9);
+        let j = Math.floor(rng() * 9);
+        if (puzzle[i][j] !== 0) {
+          puzzle[i][j] = 0;
+          cellsToRemove--;
+        }
+      }
+      return { puzzle, solution };
+    }
+
+    // Build the sudoku board in the DOM
+    function buildBoard(puzzle) {
+      const boardContainer = document.getElementById('sudoku-board');
+      boardContainer.innerHTML = "";
+      for (let i = 0; i < 9; i++) {
+        for (let j = 0; j < 9; j++) {
+          const cell = document.createElement('div');
+          cell.className = 'sudoku-cell';
+          // Add thicker borders for 3x3 blocks
+          cell.style.borderTop = (i % 3 === 0) ? '2px solid #000' : '1px solid #ccc';
+          cell.style.borderLeft = (j % 3 === 0) ? '2px solid #000' : '1px solid #ccc';
+          cell.style.borderRight = (j === 8) ? '2px solid #000' : '1px solid #ccc';
+          cell.style.borderBottom = (i === 8) ? '2px solid #000' : '1px solid #ccc';
+
+          if (puzzle[i][j] !== 0) {
+            // Given number (non-editable)
+            const span = document.createElement('span');
+            span.textContent = puzzle[i][j];
+            cell.appendChild(span);
+          } else {
+            // Empty cell (editable)
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.maxLength = '1';
+            input.dataset.row = i;
+            input.dataset.col = j;
+            input.addEventListener('input', onInput);
+            cell.appendChild(input);
+          }
+          boardContainer.appendChild(cell);
+        }
+      }
+    }
+
+    // Handle user input in a cell
+    function onInput(e) {
+      const input = e.target;
+      let value = input.value;
+      if (value.length > 1) {
+        value = value.slice(0, 1);
+        input.value = value;
+      }
+      // Only accept digits 1-9
+      if (!/^[1-9]$/.test(value)) {
+        input.value = "";
+        return;
+      }
+      const row = parseInt(input.dataset.row);
+      const col = parseInt(input.dataset.col);
+      // Check against solution
+      if (parseInt(value) !== currentSolution[row][col]) {
+        input.classList.add('wrong');
+        setTimeout(() => {
+          input.classList.remove('wrong');
+          input.value = "";
+        }, 500);
+        wrongGuesses++;
+        updateLives();
+      } else {
+        // Correct guess: lock the cell
+        input.disabled = true;
+        checkWin();
+      }
+    }
+
+    // Update heart display and game over message if needed
+    function updateLives() {
+      const livesContainer = document.getElementById('lives');
+      const remaining = Math.max(0, 3 - wrongGuesses);
+      livesContainer.textContent = "";
+      for (let i = 0; i < remaining; i++) {
+        livesContainer.textContent += "♥";
+      }
+      if (wrongGuesses >= 3) {
+        document.getElementById('message').textContent = "Game Over!";
+      }
+    }
+
+    // Check if the puzzle is completely and correctly filled
+    function checkWin() {
+      const inputs = document.querySelectorAll('#sudoku-board input');
+      for (let input of inputs) {
+        if (input.value === "") return;
+      }
+      document.getElementById('message').textContent = "Winner!";
+    }
+
+    // Start game when button is clicked
+    document.getElementById('start-button').addEventListener('click', function() {
+      const seed = document.getElementById('seed-input').value;
+      if (!/^\d{4}$/.test(seed)) {
+        alert("Please enter a valid 4-digit number.");
+        return;
+      }
+      wrongGuesses = 0;
+      updateLives();
+      document.getElementById('message').textContent = "";
+
+      const result = generatePuzzle(seed);
+      currentPuzzle = result.puzzle;
+      currentSolution = result.solution;
+      // Hide seed input area once game starts
+      document.getElementById('seed-container').style.display = 'none';
+      buildBoard(currentPuzzle);
+    });
+  </script>
+</body>
+</html>
