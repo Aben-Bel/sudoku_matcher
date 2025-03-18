@@ -671,8 +671,8 @@
                                     tempGrid[row][col] = possibilities[0];
                                     progress = true;
                                 } 
-                                // If more than 5 possibilities, the puzzle might be too difficult
-                                else if (possibilities.length > 5) {
+                                // If more than 4 possibilities, the puzzle might be too difficult
+                                else if (possibilities.length > 4) {
                                     // Allow some cells to have multiple possibilities
                                     // but not too many to keep the puzzle solvable
                                     const difficulty = this.seededRandom();
